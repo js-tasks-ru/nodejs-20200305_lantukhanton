@@ -26,45 +26,38 @@ server.on('request', (req, res) => {
     case 'POST':
       checkNestedPath(res, pathName);
 
-      fs.access(filepath, err => {
-        if (!err) {
+      const writeStream = fs.createWriteStream(filepath, {highWaterMark: 64, flags: 'wx'});
+      const limitStream = new LimitSizeStream({limit: 1024 * 1024});
+
+      res.on('close', () => {
+        if (res.finished) return;
+        limitStream.destroy();
+        writeStream.destroy();
+        fs.unlink(filepath, () => {});
+      });
+
+      writeStream.on('error', (err) => {
+        if (err.code === 'EEXIST') {
           generateServerRes(res, 409, 'File already exists');
         } else {
-          const writeStream = fs.createWriteStream(filepath, {highWaterMark: 64});
-          const limitStream = new LimitSizeStream({limit: 1024 * 1024});
-
-          res.on('close', () => {
-            if (res.finished) return;
-            limitStream.destroy();
-            writeStream.destroy();
-
-            fs.unlink(filepath, err => {
-              if (err) generateServerRes(res, 201, 'Ok');
-            });
-          });
-
-          writeStream.on('error', () => {
-            generateServerRes(res, 500, 'Server error');
-          });
-
-          limitStream.on('error', err => {
-            writeStream.destroy();
-
-            if (err.code === 'LIMIT_EXCEEDED') {
-              fs.unlink(filepath, err => {
-                if (!err) generateServerRes(res, 413, 'Max size is 1Mb');
-              });
-            }
-          });
-
-          writeStream.on('finish', () => {
-            generateServerRes(res, 201, 'Ok');
-          });
-
-          req.pipe(limitStream).pipe(writeStream);
+          generateServerRes(res, 500, 'Server error');
+          fs.unlink(filepath, () => {});
         }
       });
 
+      limitStream.on('error', (err) => {
+        writeStream.destroy();
+        if (err.code === 'LIMIT_EXCEEDED') {
+          generateServerRes(res, 413, 'Max size is 1Mb');
+          fs.unlink(filepath, () => {});
+        }
+      });
+
+      writeStream.on('close', () => {
+        generateServerRes(res, 201, 'Ok');
+      });
+
+      req.pipe(limitStream).pipe(writeStream);
       break;
     default:
       res.statusCode = 501;
