@@ -2,7 +2,6 @@ const Product = require('../models/Product');
 
 module.exports.productsByQuery = async function productsByQuery(ctx, next) {
   const query = ctx.query.query;
-  console.log(query);
 
   if (!query) return next();
   const products = await Product
